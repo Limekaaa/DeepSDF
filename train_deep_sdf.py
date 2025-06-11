@@ -336,13 +336,17 @@ def main_function(experiment_directory, continue_from, batch_split):
     num_epochs = specs["NumEpochs"]
     log_frequency = get_spec_with_default(specs, "LogFrequency", 10)
 
+    """
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
     sdf_dataset = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=False
     )
-
+    """
+    sdf_dataset = deep_sdf.data.SDFSamples(
+        data_source, train_split_file,num_samp_per_scene, load_ram=False
+    )
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
 
@@ -448,7 +452,7 @@ def main_function(experiment_directory, continue_from, batch_split):
             lat_vecs.embedding_dim,
         )
     )
-
+    start_training = time.time()
     for epoch in range(start_epoch, num_epochs + 1):
 
         start = time.time()
@@ -523,8 +527,9 @@ def main_function(experiment_directory, continue_from, batch_split):
             optimizer_all.step()
 
         end = time.time()
-
         seconds_elapsed = end - start
+        logging.info("epoch {} finished in {} seconds with loss {}".format(epoch, round(seconds_elapsed, 2), round(batch_loss,4)))
+        
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
@@ -548,7 +553,10 @@ def main_function(experiment_directory, continue_from, batch_split):
                 param_mag_log,
                 epoch,
             )
-
+    stop_training = time.time()
+    training_time = stop_training - start_training
+    logging.info("Training finished in {} seconds".format(training_time))
+    print(f"Training time : {training_time:.2f} seconds")
 
 if __name__ == "__main__":
 
