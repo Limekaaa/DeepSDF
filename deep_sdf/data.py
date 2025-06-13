@@ -39,6 +39,33 @@ def load_data_from_file(filename:str, resolution:float, query_range):
 
     return to_ret
 
+
+def unpack_sdf_samples_from_ram(data, subsample=None):
+    if subsample is None:
+        return torch.cat(data, axis=0)
+    pos_tensor = data[0]
+    neg_tensor = data[1]
+
+    # split the sample into half
+    half = int(subsample / 2)
+
+    pos_size = pos_tensor.shape[0]
+    neg_size = neg_tensor.shape[0]
+
+    pos_start_ind = random.randint(0, pos_size - half)
+    sample_pos = pos_tensor[pos_start_ind : (pos_start_ind + half)]
+
+    if neg_size <= half:
+        random_neg = (torch.rand(half) * neg_tensor.shape[0]).long()
+        sample_neg = torch.index_select(neg_tensor, 0, random_neg)
+    else:
+        neg_start_ind = random.randint(0, neg_size - half)
+        sample_neg = neg_tensor[neg_start_ind : (neg_start_ind + half)]
+
+    samples = torch.cat([sample_pos, sample_neg], 0)
+
+    return samples
+
 class SDFSamples(torch.utils.data.Dataset):
     def __init__(
         self,
