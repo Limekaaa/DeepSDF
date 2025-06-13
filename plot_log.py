@@ -71,12 +71,18 @@ def load_logs(experiment_directory, type):
             ax.plot(mags)
         ax.set(xlabel="Epoch", ylabel="Magnitude", title="Parameter Magnitude")
         ax.legend(logs["param_magnitude"].keys())
+    elif type == 'all':
+        types = ['loss', 'learning_rate', 'time', 'lat_mag', 'param_mag']
+        for t in types:
+            load_logs(experiment_directory, t)
 
     else:
         raise Exception('unrecognized plot type "{}"'.format(type))
 
-    ax.grid()
-    plt.show()
+    if type != 'all':
+        ax.grid()
+        plt.savefig(f"{experiment_directory}/{type}.png")
+        #plt.show()
 
 
 if __name__ == "__main__":
