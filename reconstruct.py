@@ -12,6 +12,16 @@ import torch
 import deep_sdf
 import deep_sdf.workspace as ws
 
+import numpy as np
+import matplotlib.pyplot as plt
+
+import math
+
+def get_spec_with_default(specs, key, default):
+    try:
+        return specs[key]
+    except KeyError:
+        return default
 
 def reconstruct(
     decoder,
@@ -35,13 +45,16 @@ def reconstruct(
     adjust_lr_every = int(num_iterations / 2)
 
     if type(stat) == type(0.1):
-        latent = torch.ones(1, latent_size).normal_(mean=0, std=stat).cuda()
+        #latent = torch.ones(1, latent_size).normal_(mean=0, std=stat).cuda()
+        latent_code = torch.nn.Embedding(1, latent_size).cuda()
+        torch.nn.init.normal_(latent_code.weight, mean=0.0, std=stat)
     else:
         latent = torch.normal(stat[0].detach(), stat[1].detach()).cuda()
 
-    latent.requires_grad = True
+    #latent.requires_grad = True # commented out by me
 
-    optimizer = torch.optim.Adam([latent], lr=lr)
+    #optimizer = torch.optim.Adam([latent], lr=lr) # commented out by me
+    optimizer = torch.optim.Adam(latent_code.parameters(), lr=lr)
 
     loss_num = 0
     loss_l1 = torch.nn.L1Loss()
@@ -49,6 +62,13 @@ def reconstruct(
     for e in range(num_iterations):
 
         decoder.eval()
+
+        # Added by me _____________________________________________________________________
+        if type(stat) == type(0.1):
+            latent = latent_code(torch.tensor([0]).cuda())
+
+        # And of added by me _____________________________________________________________________
+
         sdf_data = deep_sdf.data.unpack_sdf_samples_from_ram(
             test_sdf, num_samples
         ).cuda()
@@ -65,12 +85,12 @@ def reconstruct(
 
         inputs = torch.cat([latent_inputs, xyz], 1).cuda()
 
-        pred_sdf = decoder(inputs)
-
+        pred_sdf = decoder(inputs.float())
+        """
         # TODO: why is this needed?
         if e == 0:
-            pred_sdf = decoder(inputs)
-
+            pred_sdf = decoder(inputs.float())
+        """
         pred_sdf = torch.clamp(pred_sdf, -clamp_dist, clamp_dist)
 
         loss = loss_l1(pred_sdf, sdf_gt)
@@ -81,11 +101,14 @@ def reconstruct(
 
         if e % 50 == 0:
             logging.debug(loss.cpu().data.numpy())
+            print(f"loss: {loss.cpu().data.numpy()}")
             logging.debug(e)
             logging.debug(latent.norm())
         loss_num = loss.cpu().data.numpy()
 
-    return loss_num, latent
+    print(f"Final loss: {loss_num}")
+    #return loss_num, latent
+    return loss_num, latent_code(torch.tensor([0]).cuda())  # Return the latent code from the embedding
 
 
 if __name__ == "__main__":
@@ -114,14 +137,14 @@ if __name__ == "__main__":
         "--data",
         "-d",
         dest="data_source",
-        required=True,
+        #required=True,
         help="The data source directory.",
     )
     arg_parser.add_argument(
         "--split",
         "-s",
         dest="split_filename",
-        required=True,
+        #required=True,
         help="The split to reconstruct.",
     )
     arg_parser.add_argument(
@@ -139,7 +162,7 @@ if __name__ == "__main__":
     deep_sdf.add_common_args(arg_parser)
 
     args = arg_parser.parse_args()
-
+    
     deep_sdf.configure_logging(args)
 
     def empirical_stat(latent_vecs, indices):
@@ -152,12 +175,16 @@ if __name__ == "__main__":
 
     specs_filename = os.path.join(args.experiment_directory, "specs.json")
 
+
     if not os.path.isfile(specs_filename):
         raise Exception(
             'The experiment directory does not include specifications file "specs.json"'
         )
 
     specs = json.load(open(specs_filename))
+
+    args.split_filename = specs["TestSplit"]
+    args.data_source = specs["DataSource"]
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
 
@@ -216,7 +243,8 @@ if __name__ == "__main__":
         if "npz" not in npz:
             continue
 
-        full_filename = os.path.join(args.data_source, ws.sdf_samples_subdir, npz)
+        #full_filename = os.path.join(args.data_source, ws.sdf_samples_subdir, npz) # Original line
+        full_filename = os.path.join(args.data_source, npz) # Modified line to use ws.sdf_samples_subdir
 
         logging.debug("loading {}".format(npz))
 
@@ -255,8 +283,8 @@ if __name__ == "__main__":
                 int(args.iterations),
                 latent_size,
                 data_sdf,
-                0.01,  # [emp_mean,emp_var],
-                0.1,
+                get_spec_with_default(specs, "CodeInitStdDev", 1.0) / math.sqrt(latent_size),  # [emp_mean,emp_var],
+                specs["ClampingDistance"],#0.1,
                 num_samples=8000,
                 lr=5e-3,
                 l2reg=True,
@@ -270,6 +298,102 @@ if __name__ == "__main__":
 
             decoder.eval()
 
+            # Select a fixed number of evaluation points
+            sdf_data_eval = deep_sdf.data.unpack_sdf_samples_from_ram(data_sdf)
+            sdf_data_eval = torch.cat(sdf_data_eval, dim=0).cuda()
+            eval_samples = sdf_data_eval.shape[0]
+
+            #sdf_data_eval = deep_sdf.data.unpack_sdf_samples_from_ram(data_sdf, eval_samples).cuda()
+
+            # Extract XYZ and ground truth SDF
+            xyz_eval = sdf_data_eval[:, 0:3]
+            sdf_gt_eval = sdf_data_eval[:, 3].unsqueeze(1)
+            sdf_gt_eval = torch.clamp(sdf_gt_eval, -specs["ClampingDistance"], specs["ClampingDistance"])
+
+            # Prepare input by combining xyz with optimized latent
+            latent_inputs = latent.expand(eval_samples, -1)
+            inputs_eval = torch.cat([latent_inputs, xyz_eval], dim=1)
+
+            # Predict the SDF
+            with torch.no_grad():
+                pred_sdf_eval = decoder(inputs_eval.float())
+                pred_sdf_eval = torch.clamp(pred_sdf_eval, -specs["ClampingDistance"], specs["ClampingDistance"])
+
+            # Move everything to CPU for plotting
+            xyz_np = xyz_eval[:, :2].cpu().numpy()  # Only x and y
+            sdf_gt_np = sdf_gt_eval.cpu().numpy()
+            pred_sdf_np = pred_sdf_eval.cpu().numpy()
+
+            # Plotting
+            fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+            sc1 = axs[0].scatter(xyz_np[:, 0], xyz_np[:, 1], c=sdf_gt_np.squeeze(), cmap='viridis')
+            axs[0].set_title('Ground Truth SDF')
+            axs[0].set_xlabel('X')
+            axs[0].set_ylabel('Y')
+            plt.colorbar(sc1, ax=axs[0])
+
+            sc2 = axs[1].scatter(xyz_np[:, 0], xyz_np[:, 1], c=sdf_gt_np.squeeze(), cmap='viridis')
+            axs[1].set_title('Predicted SDF')
+            axs[1].set_xlabel('X')
+            axs[1].set_ylabel('Y')
+            plt.colorbar(sc2, ax=axs[1])
+
+            plt.tight_layout()
+
+            mesh_name = os.path.splitext(os.path.basename(npz))[0]
+            mesh_filename = os.path.join(reconstruction_meshes_dir, mesh_name)
+            image_filename = mesh_filename + "_sdf2d.png"
+            plt.savefig(image_filename)
+
+            plt.close()
+
+            print(f"Saved 2D SDF image to: {image_filename}")
+            #plt.show()
+"""
+            # Define the grid resolution
+            resolution = 256
+            x_range = y_range = (0, 1.0)
+
+            # Create 2D grid of points with Z = 0
+            x = np.linspace(*x_range, resolution)
+            y = np.linspace(*y_range, resolution)
+            xx, yy = np.meshgrid(x, y)
+            grid_points = np.stack([xx, yy, np.zeros_like(xx)], axis=-1).reshape(-1, 3)
+
+            # Convert to torch tensor
+            grid_tensor = torch.FloatTensor(grid_points).cuda()
+
+            # Expand latent vector to match grid points
+            latent_inputs = latent.expand(grid_tensor.shape[0], -1)
+
+            # Concatenate latent and input points
+            decoder_input = torch.cat([latent_inputs, grid_tensor], dim=1)
+
+            # Predict SDF values
+            with torch.no_grad():
+                sdf_pred = decoder(decoder_input).squeeze().cpu().numpy()
+
+            # Reshape to 2D grid
+            sdf_image = sdf_pred.reshape(resolution, resolution)
+
+            # Optional: Save SDF as image
+            plt.figure(figsize=(6, 6))
+            plt.imshow(sdf_image, extent=(x_range[0], x_range[1], y_range[0], y_range[1]), origin='lower', cmap='seismic')
+            plt.colorbar(label='SDF value')
+            plt.title('2D SDF Reconstruction (Z = 0)')
+            plt.xlabel('X')
+            plt.ylabel('Y')
+            mesh_name = os.path.splitext(os.path.basename(npz))[0]
+            mesh_filename = os.path.join(reconstruction_meshes_dir, mesh_name)
+            image_filename = mesh_filename + "_sdf2d.png"
+            plt.savefig(image_filename)
+            plt.close()
+
+            print(f"Saved 2D SDF image to: {image_filename}")
+"""
+
+"""
             if not os.path.exists(os.path.dirname(mesh_filename)):
                 os.makedirs(os.path.dirname(mesh_filename))
 
@@ -285,3 +409,4 @@ if __name__ == "__main__":
                 os.makedirs(os.path.dirname(latent_filename))
 
             torch.save(latent.unsqueeze(0), latent_filename)
+"""

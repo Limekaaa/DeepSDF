@@ -1,0 +1,20 @@
+{
+    "Description": "This data represents unit squares with holes, used for training a shape representation model.",
+    "dataset_name": "unit_squares_with_holes",
+    "num_samples": 200,
+    "min_hole": 1,
+    "max_hole": 3,
+    "min_radius": 0.05,
+    "save_format": ["msh", "npz"],
+    "path": "data",
+    "query_range": {
+        "x": [0, 1.0],
+        "y": [0, 1.0],
+        "z": [0, 0]
+    },
+    "SamplesPerScene": 10201,
+    "Split":{
+        "train_proportion": 0.8,
+        "split_path": "examples/splits/"
+    }
+}

@@ -11,6 +11,8 @@ import math
 import json
 import time
 
+import numpy as np
+
 import deep_sdf
 import deep_sdf.workspace as ws
 
@@ -493,7 +495,7 @@ def main_function(experiment_directory, continue_from, batch_split):
                 input = torch.cat([batch_vecs, xyz[i]], dim=1)
 
                 # NN optimization
-                pred_sdf = decoder(input)
+                pred_sdf = decoder(input.float())
 
                 if enforce_minmax:
                     pred_sdf = torch.clamp(pred_sdf, minT, maxT)
@@ -513,8 +515,10 @@ def main_function(experiment_directory, continue_from, batch_split):
                 batch_loss += chunk_loss.item()
 
             logging.debug("loss = {}".format(batch_loss))
+        
 
             loss_log.append(batch_loss)
+            
 
             if grad_clip is not None:
 
@@ -524,8 +528,51 @@ def main_function(experiment_directory, continue_from, batch_split):
 
         end = time.time()
 
+        if epoch % specs["SnapshotFrequency"] == 0:
+            import matplotlib.pyplot as plt
+            decoder.eval()
+            with torch.no_grad():
+                # Get a batch of SDF samples and indices
+                sdf_data_eval, indices_eval = next(iter(sdf_loader))
+                sdf_data_eval = sdf_data_eval.reshape(-1, 4).cuda()
+                xyz_eval = sdf_data_eval[:, 0:3]
+                sdf_gt_eval = sdf_data_eval[:, 3].unsqueeze(1)
+
+                # Get latent vectors for the current batch
+                latent_vectors_eval = lat_vecs(indices_eval).cuda()
+                latent_vectors_eval = latent_vectors_eval.repeat_interleave(num_samp_per_scene, dim=0)
+                inputs_eval = torch.cat([latent_vectors_eval, xyz_eval], dim=1)
+
+                # Predict SDF values
+                pred_sdf_eval = decoder(inputs_eval)
+
+                # Move data to CPU for plotting
+                xyz_cpu = xyz_eval[:, :2].cpu().numpy()  # only x and y
+                sdf_gt_cpu = sdf_gt_eval.cpu().numpy()
+                pred_sdf_cpu = pred_sdf_eval.cpu().numpy()
+
+                # Plotting
+                fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+                sc1 = axs[0].scatter(xyz_cpu[:, 0], xyz_cpu[:, 1], c=sdf_gt_cpu.squeeze(), cmap='viridis')
+                axs[0].set_title('Ground Truth SDF')
+                axs[0].set_xlabel('X')
+                axs[0].set_ylabel('Y')
+                plt.colorbar(sc1, ax=axs[0])
+
+                sc2 = axs[1].scatter(xyz_cpu[:, 0], xyz_cpu[:, 1], c=pred_sdf_cpu.squeeze(), cmap='viridis')
+                axs[1].set_title('Predicted SDF')
+                axs[1].set_xlabel('X')
+                axs[1].set_ylabel('Y')
+                plt.colorbar(sc2, ax=axs[1])
+
+                plt.tight_layout()
+                if not os.path.exists(os.path.join(experiment_directory, "TrainingReconstruction")):
+                    os.makedirs(os.path.join(experiment_directory, "TrainingReconstruction"))
+                plt.savefig(os.path.join(experiment_directory, "TrainingReconstruction",f'sdf_epoch_{epoch}.png'))
+
         seconds_elapsed = end - start
         timing_log.append(seconds_elapsed)
+        logging.info("epoch {} finished in {} seconds with loss {}".format(epoch, round(seconds_elapsed, 2), round(np.mean(loss_log),4)))
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
 
@@ -548,7 +595,6 @@ def main_function(experiment_directory, continue_from, batch_split):
                 param_mag_log,
                 epoch,
             )
-
 
 if __name__ == "__main__":
 
