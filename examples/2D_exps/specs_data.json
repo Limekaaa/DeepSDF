@@ -1,7 +1,7 @@
 {
     "Description": "This data represents unit squares with holes, used for training a shape representation model.",
     "dataset_name": "unit_squares_with_holes",
-    "num_samples": 200,
+    "num_samples": 1000,
     "min_hole": 1,
     "max_hole": 3,
     "min_radius": 0.05,
