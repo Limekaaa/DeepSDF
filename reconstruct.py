@@ -324,16 +324,19 @@ if __name__ == "__main__":
             sdf_gt_np = sdf_gt_eval.cpu().numpy()
             pred_sdf_np = pred_sdf_eval.cpu().numpy()
 
+            vmin = min(sdf_gt_np.min(), pred_sdf_np.min())
+            vmax = max(sdf_gt_np.max(), pred_sdf_np.max())
+
             # Plotting
             fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
-            sc1 = axs[0].scatter(xyz_np[:, 0], xyz_np[:, 1], c=sdf_gt_np.squeeze(), cmap='viridis')
+            sc1 = axs[0].scatter(xyz_np[:, 0], xyz_np[:, 1], c=sdf_gt_np.squeeze(), cmap='viridis', vmin=vmin, vmax=vmax)
             axs[0].set_title('Ground Truth SDF')
             axs[0].set_xlabel('X')
             axs[0].set_ylabel('Y')
             plt.colorbar(sc1, ax=axs[0])
 
-            sc2 = axs[1].scatter(xyz_np[:, 0], xyz_np[:, 1], c=sdf_gt_np.squeeze(), cmap='viridis')
+            sc2 = axs[1].scatter(xyz_np[:, 0], xyz_np[:, 1], c=pred_sdf_np.squeeze(), cmap='viridis', vmin=vmin, vmax=vmax)
             axs[1].set_title('Predicted SDF')
             axs[1].set_xlabel('X')
             axs[1].set_ylabel('Y')
