@@ -16,11 +16,101 @@ import numpy as np
 import deep_sdf
 import deep_sdf.workspace as ws
 
+from tqdm import tqdm
+
+#from reconstruct import reconstruct
+
+def reconstruct(
+    decoder,
+    num_iterations,
+    latent_size,
+    test_sdf,
+    stat,
+    clamp_dist,
+    num_samples=30000,
+    lr=5e-4,
+    l2reg=False,
+):
+    def adjust_learning_rate(
+        initial_lr, optimizer, num_iterations, decreased_by, adjust_lr_every
+    ):
+        lr = initial_lr * ((1 / decreased_by) ** (num_iterations // adjust_lr_every))
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
+
+    decreased_by = 10
+    adjust_lr_every = int(num_iterations / 2)
+
+    if type(stat) == type(0.1):
+        #latent = torch.ones(1, latent_size).normal_(mean=0, std=stat).cuda()
+        latent_code = torch.nn.Embedding(1, latent_size).cuda()
+        torch.nn.init.normal_(latent_code.weight, mean=0.0, std=stat)
+    else:
+        latent = torch.normal(stat[0].detach(), stat[1].detach()).cuda()
+
+    #latent.requires_grad = True # commented out by me
+
+    #optimizer = torch.optim.Adam([latent], lr=lr) # commented out by me
+    optimizer = torch.optim.Adam(latent_code.parameters(), lr=lr)
+
+    loss_num = 0
+    loss_l1 = torch.nn.L1Loss()
+
+    for e in range(num_iterations):
+
+        decoder.eval()
+
+        # Added by me _____________________________________________________________________
+        if type(stat) == type(0.1):
+            latent = latent_code(torch.tensor([0]).cuda())
+
+        # And of added by me _____________________________________________________________________
+
+        sdf_data = deep_sdf.data.unpack_sdf_samples_from_ram(
+            test_sdf, num_samples
+        ).cuda()
+        xyz = sdf_data[:, 0:3]
+        sdf_gt = sdf_data[:, 3].unsqueeze(1)
+
+        sdf_gt = torch.clamp(sdf_gt, -clamp_dist, clamp_dist)
+
+        adjust_learning_rate(lr, optimizer, e, decreased_by, adjust_lr_every)
+
+        optimizer.zero_grad()
+
+        latent_inputs = latent.expand(num_samples, -1)
+
+        inputs = torch.cat([latent_inputs, xyz], 1).cuda()
+
+        pred_sdf = decoder(inputs.float())
+        """
+        # TODO: why is this needed?
+        if e == 0:
+            pred_sdf = decoder(inputs.float())
+        """
+        pred_sdf = torch.clamp(pred_sdf, -clamp_dist, clamp_dist)
+
+        loss = loss_l1(pred_sdf, sdf_gt)
+        if l2reg:
+            loss += 1e-4 * torch.mean(latent.pow(2))
+        loss.backward()
+        optimizer.step()
+
+        #if e % 50 == 0:
+            #logging.debug(loss.cpu().data.numpy())
+            #print(f"loss: {loss.cpu().data.numpy()}")
+            #logging.debug(e)
+            #logging.debug(latent.norm())
+        loss_num = loss.cpu().data.numpy()
+
+    #print(f"Final loss: {loss_num}")
+    #return loss_num, latent
+    return loss_num, latent_code(torch.tensor([0]).cuda())  # Return the latent code from the embedding
+
 
 class LearningRateSchedule:
     def get_learning_rate(self, epoch):
         pass
-
 
 class ConstantLearningRateSchedule(LearningRateSchedule):
     def __init__(self, value):
@@ -29,7 +119,6 @@ class ConstantLearningRateSchedule(LearningRateSchedule):
     def get_learning_rate(self, epoch):
         return self.value
 
-
 class StepLearningRateSchedule(LearningRateSchedule):
     def __init__(self, initial, interval, factor):
         self.initial = initial
@@ -37,9 +126,7 @@ class StepLearningRateSchedule(LearningRateSchedule):
         self.factor = factor
 
     def get_learning_rate(self, epoch):
-
         return self.initial * (self.factor ** (epoch // self.interval))
-
 
 class WarmupLearningRateSchedule(LearningRateSchedule):
     def __init__(self, initial, warmed_up, length):
@@ -52,15 +139,12 @@ class WarmupLearningRateSchedule(LearningRateSchedule):
             return self.warmed_up
         return self.initial + (self.warmed_up - self.initial) * epoch / self.length
 
-
 def get_learning_rate_schedules(specs):
-
     schedule_specs = specs["LearningRateSchedule"]
 
     schedules = []
 
     for schedule_specs in schedule_specs:
-
         if schedule_specs["Type"] == "Step":
             schedules.append(
                 StepLearningRateSchedule(
@@ -89,9 +173,7 @@ def get_learning_rate_schedules(specs):
 
     return schedules
 
-
 def save_model(experiment_directory, filename, decoder, epoch):
-
     model_params_dir = ws.get_model_params_dir(experiment_directory, True)
 
     torch.save(
@@ -99,9 +181,7 @@ def save_model(experiment_directory, filename, decoder, epoch):
         os.path.join(model_params_dir, filename),
     )
 
-
 def save_optimizer(experiment_directory, filename, optimizer, epoch):
-
     optimizer_params_dir = ws.get_optimizer_params_dir(experiment_directory, True)
 
     torch.save(
@@ -109,9 +189,7 @@ def save_optimizer(experiment_directory, filename, optimizer, epoch):
         os.path.join(optimizer_params_dir, filename),
     )
 
-
 def load_optimizer(experiment_directory, filename, optimizer):
-
     full_filename = os.path.join(
         ws.get_optimizer_params_dir(experiment_directory), filename
     )
@@ -127,9 +205,7 @@ def load_optimizer(experiment_directory, filename, optimizer):
 
     return data["epoch"]
 
-
 def save_latent_vectors(experiment_directory, filename, latent_vec, epoch):
-
     latent_codes_dir = ws.get_latent_codes_dir(experiment_directory, True)
 
     all_latents = latent_vec.state_dict()
@@ -139,10 +215,7 @@ def save_latent_vectors(experiment_directory, filename, latent_vec, epoch):
         os.path.join(latent_codes_dir, filename),
     )
 
-
-# TODO: duplicated in workspace
 def load_latent_vectors(experiment_directory, filename, lat_vecs):
-
     full_filename = os.path.join(
         ws.get_latent_codes_dir(experiment_directory), filename
     )
@@ -153,8 +226,6 @@ def load_latent_vectors(experiment_directory, filename, lat_vecs):
     data = torch.load(full_filename)
 
     if isinstance(data["latent_codes"], torch.Tensor):
-
-        # for backwards compatibility
         if not lat_vecs.num_embeddings == data["latent_codes"].size()[0]:
             raise Exception(
                 "num latent codes mismatched: {} vs {}".format(
@@ -173,7 +244,6 @@ def load_latent_vectors(experiment_directory, filename, lat_vecs):
 
     return data["epoch"]
 
-
 def save_logs(
     experiment_directory,
     loss_log,
@@ -181,9 +251,9 @@ def save_logs(
     timing_log,
     lat_mag_log,
     param_mag_log,
+    test_loss_log,
     epoch,
 ):
-
     torch.save(
         {
             "epoch": epoch,
@@ -192,13 +262,12 @@ def save_logs(
             "timing": timing_log,
             "latent_magnitude": lat_mag_log,
             "param_magnitude": param_mag_log,
+            "test_loss": test_loss_log,
         },
         os.path.join(experiment_directory, ws.logs_filename),
     )
 
-
 def load_logs(experiment_directory):
-
     full_filename = os.path.join(experiment_directory, ws.logs_filename)
 
     if not os.path.isfile(full_filename):
@@ -212,23 +281,22 @@ def load_logs(experiment_directory):
         data["timing"],
         data["latent_magnitude"],
         data["param_magnitude"],
+        data["test_loss"],
         data["epoch"],
     )
 
-
-def clip_logs(loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, epoch):
-
+def clip_logs(loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, test_loss_log, epoch):
     iters_per_epoch = len(loss_log) // len(lr_log)
 
     loss_log = loss_log[: (iters_per_epoch * epoch)]
     lr_log = lr_log[:epoch]
     timing_log = timing_log[:epoch]
     lat_mag_log = lat_mag_log[:epoch]
+    test_loss_log = test_loss_log[:epoch]  # Clip test loss log
     for n in param_mag_log:
         param_mag_log[n] = param_mag_log[n][:epoch]
 
-    return (loss_log, lr_log, timing_log, lat_mag_log, param_mag_log)
-
+    return (loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, test_loss_log)
 
 def get_spec_with_default(specs, key, default):
     try:
@@ -236,10 +304,8 @@ def get_spec_with_default(specs, key, default):
     except KeyError:
         return default
 
-
 def get_mean_latent_vector_magnitude(latent_vectors):
     return torch.mean(torch.norm(latent_vectors.weight.data.detach(), dim=1))
-
 
 def append_parameter_magnitudes(param_mag_log, model):
     for name, param in model.named_parameters():
@@ -249,9 +315,58 @@ def append_parameter_magnitudes(param_mag_log, model):
             param_mag_log[name] = []
         param_mag_log[name].append(param.data.norm().item())
 
+def compute_test_loss(decoder, test_loader, num_iterations, latent_size, stat, clamp_dist, num_samples, lr, l2reg):
+    """
+    Compute the test loss over the test dataset.
+    """
+    test_loss = 0.0
+    num_test_batches = 0
+    #minT = -clamp_dist
+    #maxT = clamp_dist
+    #enforce_minmax = True
 
-def main_function(experiment_directory, continue_from, batch_split):
+    decoder.eval()
+    #with torch.no_grad():
+    for sdf_data, indices in tqdm(test_loader, desc="Testing"):
 
+        """
+        samples_per_scene = sdf_data.shape[1]
+        sdf_data = sdf_data.reshape(-1, 4)
+        num_sdf_samples = sdf_data.shape[0]
+
+        xyz = sdf_data[:, 0:3]
+        sdf_gt = sdf_data[:, 3].unsqueeze(1)
+
+        if enforce_minmax:
+            sdf_gt = torch.clamp(sdf_gt, minT, maxT)
+
+        indices = indices.unsqueeze(-1).repeat(1, samples_per_scene).flatten()
+
+        batch_vecs = lat_vecs(indices)
+
+        input = torch.cat([batch_vecs, xyz], dim=1)
+        input = input.to(device=torch.device("cuda"))
+
+        pred_sdf = decoder(input.float())
+
+        if enforce_minmax:
+            pred_sdf = torch.clamp(pred_sdf, minT, maxT)
+
+        batch_loss = loss_l1(pred_sdf, sdf_gt.cuda()) / num_sdf_samples
+        test_loss += batch_loss.item()
+        num_test_batches += 1
+        """
+        data = sdf_data[0]
+        data = [data[data[:, -1] > 0], data[data[:, -1] <= 0]]
+        test_err, _ = reconstruct(decoder, num_iterations, latent_size, data, stat, clamp_dist, num_samples, lr, l2reg)
+        test_loss += test_err
+        num_test_batches += 1 
+
+    return test_loss / num_test_batches if num_test_batches > 0 else 0.0
+    
+    
+
+def main_function(experiment_directory, continue_from, batch_split, num_iterations):
     logging.debug("running " + experiment_directory)
 
     specs = ws.load_experiment_specifications(experiment_directory)
@@ -260,6 +375,7 @@ def main_function(experiment_directory, continue_from, batch_split):
 
     data_source = specs["DataSource"]
     train_split_file = specs["TrainSplit"]
+    test_split_file = specs.get("TestSplit", None)
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
 
@@ -286,13 +402,11 @@ def main_function(experiment_directory, continue_from, batch_split):
         logging.debug("clipping gradients to max norm {}".format(grad_clip))
 
     def save_latest(epoch):
-
         save_model(experiment_directory, "latest.pth", decoder, epoch)
         save_optimizer(experiment_directory, "latest.pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, "latest.pth", lat_vecs, epoch)
 
     def save_checkpoints(epoch):
-
         save_model(experiment_directory, str(epoch) + ".pth", decoder, epoch)
         save_optimizer(experiment_directory, str(epoch) + ".pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, str(epoch) + ".pth", lat_vecs, epoch)
@@ -302,7 +416,6 @@ def main_function(experiment_directory, continue_from, batch_split):
         sys.exit(0)
 
     def adjust_learning_rate(lr_schedules, optimizer, epoch):
-
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedules[i].get_learning_rate(epoch)
 
@@ -332,33 +445,51 @@ def main_function(experiment_directory, continue_from, batch_split):
 
     logging.info("training with {} GPU(s)".format(torch.cuda.device_count()))
 
-    # if torch.cuda.device_count() > 1:
-    decoder = torch.nn.DataParallel(decoder)
+    if torch.cuda.device_count() > 1:
+        decoder = torch.nn.DataParallel(decoder)
 
     num_epochs = specs["NumEpochs"]
     log_frequency = get_spec_with_default(specs, "LogFrequency", 10)
+    test_frequency = get_spec_with_default(specs, "TestFrequency", 100)
 
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
-    sdf_dataset = deep_sdf.data.SDFSamples(
+    if test_split_file is not None:
+        with open(test_split_file, "r") as f:
+            test_split = json.load(f)
+
+    sdf_dataset_train = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=False
     )
 
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
 
-    sdf_loader = data_utils.DataLoader(
-        sdf_dataset,
+    sdf_loader_train = data_utils.DataLoader(
+        sdf_dataset_train,
         batch_size=scene_per_batch,
         shuffle=True,
         num_workers=num_data_loader_threads,
         drop_last=True,
     )
 
+    if test_split_file is not None:
+        sdf_dataset_test = deep_sdf.data.SDFSamples(
+            data_source, test_split, num_samp_per_scene, load_ram=False
+        )
+
+        sdf_loader_test = data_utils.DataLoader(
+            sdf_dataset_test,
+            batch_size=1,
+            shuffle=False,
+            num_workers=num_data_loader_threads,
+            drop_last=True,
+        )
+
     logging.debug("torch num_threads: {}".format(torch.get_num_threads()))
 
-    num_scenes = len(sdf_dataset)
+    num_scenes = len(sdf_dataset_train)
 
     logging.info("There are {} scenes".format(num_scenes))
 
@@ -397,11 +528,11 @@ def main_function(experiment_directory, continue_from, batch_split):
     lat_mag_log = []
     timing_log = []
     param_mag_log = {}
+    test_loss_log = []
 
     start_epoch = 1
 
     if continue_from is not None:
-
         logging.info('continuing from "{}"'.format(continue_from))
 
         lat_epoch = load_latent_vectors(
@@ -416,13 +547,13 @@ def main_function(experiment_directory, continue_from, batch_split):
             experiment_directory, continue_from + ".pth", optimizer_all
         )
 
-        loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, log_epoch = load_logs(
+        loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, test_loss_log, log_epoch = load_logs(
             experiment_directory
         )
 
         if not log_epoch == model_epoch:
-            loss_log, lr_log, timing_log, lat_mag_log, param_mag_log = clip_logs(
-                loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, model_epoch
+            loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, test_loss_log = clip_logs(
+                loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, test_loss_log, model_epoch
             )
 
         if not (model_epoch == optimizer_epoch and model_epoch == lat_epoch):
@@ -452,7 +583,6 @@ def main_function(experiment_directory, continue_from, batch_split):
     )
 
     for epoch in range(start_epoch, num_epochs + 1):
-
         start = time.time()
 
         logging.info("epoch {}...".format(epoch))
@@ -461,9 +591,7 @@ def main_function(experiment_directory, continue_from, batch_split):
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
 
-        for sdf_data, indices in sdf_loader:
-
-            # Process the input data
+        for sdf_data, indices in sdf_loader_train:
             sdf_data = sdf_data.reshape(-1, 4)
 
             num_sdf_samples = sdf_data.shape[0]
@@ -489,12 +617,11 @@ def main_function(experiment_directory, continue_from, batch_split):
             optimizer_all.zero_grad()
 
             for i in range(batch_split):
-
                 batch_vecs = lat_vecs(indices[i])
 
                 input = torch.cat([batch_vecs, xyz[i]], dim=1)
+                input = input.to(device=torch.device("cuda"))
 
-                # NN optimization
                 pred_sdf = decoder(input.float())
 
                 if enforce_minmax:
@@ -515,64 +642,39 @@ def main_function(experiment_directory, continue_from, batch_split):
                 batch_loss += chunk_loss.item()
 
             logging.debug("loss = {}".format(batch_loss))
-        
 
             loss_log.append(batch_loss)
-            
 
             if grad_clip is not None:
-
                 torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
 
             optimizer_all.step()
 
         end = time.time()
 
-        if epoch % specs["SnapshotFrequency"] == 0:
-            import matplotlib.pyplot as plt
-            decoder.eval()
-            with torch.no_grad():
-                # Get a batch of SDF samples and indices
-                sdf_data_eval, indices_eval = next(iter(sdf_loader))
-                sdf_data_eval = sdf_data_eval.reshape(-1, 4).cuda()
-                xyz_eval = sdf_data_eval[:, 0:3]
-                sdf_gt_eval = sdf_data_eval[:, 3].unsqueeze(1)
+        if epoch % test_frequency == 0 and test_split_file is not None:
+            test_loss = compute_test_loss(
+                decoder, 
+                sdf_loader_test,
+                num_iterations,
+                latent_size,         
+                get_spec_with_default(specs, "CodeInitStdDev", 1.0) / math.sqrt(latent_size),  # [emp_mean,emp_var],
+                specs["ClampingDistance"],#0.1,
+                num_samples=8000,
+                lr=5e-3,
+                l2reg=True,
+            )
 
-                # Get latent vectors for the current batch
-                latent_vectors_eval = lat_vecs(indices_eval).cuda()
-                latent_vectors_eval = latent_vectors_eval.repeat_interleave(num_samp_per_scene, dim=0)
-                inputs_eval = torch.cat([latent_vectors_eval, xyz_eval], dim=1)
-
-                # Predict SDF values
-                pred_sdf_eval = decoder(inputs_eval)
-
-                # Move data to CPU for plotting
-                xyz_cpu = xyz_eval[:, :2].cpu().numpy()  # only x and y
-                sdf_gt_cpu = sdf_gt_eval.cpu().numpy()
-                pred_sdf_cpu = pred_sdf_eval.cpu().numpy()
-
-                # Plotting
-                fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-                sc1 = axs[0].scatter(xyz_cpu[:, 0], xyz_cpu[:, 1], c=sdf_gt_cpu.squeeze(), cmap='viridis')
-                axs[0].set_title('Ground Truth SDF')
-                axs[0].set_xlabel('X')
-                axs[0].set_ylabel('Y')
-                plt.colorbar(sc1, ax=axs[0])
-
-                sc2 = axs[1].scatter(xyz_cpu[:, 0], xyz_cpu[:, 1], c=pred_sdf_cpu.squeeze(), cmap='viridis')
-                axs[1].set_title('Predicted SDF')
-                axs[1].set_xlabel('X')
-                axs[1].set_ylabel('Y')
-                plt.colorbar(sc2, ax=axs[1])
-
-                plt.tight_layout()
-                if not os.path.exists(os.path.join(experiment_directory, "TrainingReconstruction")):
-                    os.makedirs(os.path.join(experiment_directory, "TrainingReconstruction"))
-                plt.savefig(os.path.join(experiment_directory, "TrainingReconstruction",f'sdf_epoch_{epoch}.png'))
+            test_loss_log.append(test_loss)
+            logging.info(f"Epoch {epoch}, Test Loss: {test_loss}")
 
         seconds_elapsed = end - start
         timing_log.append(seconds_elapsed)
-        logging.info("epoch {} finished in {} seconds with loss {}".format(epoch, round(seconds_elapsed, 2), round(np.mean(loss_log),4)))
+        logging.info(
+            "epoch {} finished in {} seconds with loss {}".format(
+                epoch, round(seconds_elapsed, 2), round(np.mean(loss_log), 4)
+            )
+        )
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
 
@@ -584,7 +686,6 @@ def main_function(experiment_directory, continue_from, batch_split):
             save_checkpoints(epoch)
 
         if epoch % log_frequency == 0:
-
             save_latest(epoch)
             save_logs(
                 experiment_directory,
@@ -593,11 +694,11 @@ def main_function(experiment_directory, continue_from, batch_split):
                 timing_log,
                 lat_mag_log,
                 param_mag_log,
+                test_loss_log,
                 epoch,
             )
 
 if __name__ == "__main__":
-
     import argparse
 
     arg_parser = argparse.ArgumentParser(description="Train a DeepSDF autodecoder")
@@ -628,10 +729,17 @@ if __name__ == "__main__":
         + "sizes in memory constrained environments.",
     )
 
+    arg_parser.add_argument(
+        "--num_iterations",
+        dest="num_iterations",
+        default=800,
+        help="Number of iterations to create latent vectors of the test shape."
+    )
+
     deep_sdf.add_common_args(arg_parser)
 
     args = arg_parser.parse_args()
 
     deep_sdf.configure_logging(args)
 
-    main_function(args.experiment_directory, args.continue_from, int(args.batch_split))
+    main_function(args.experiment_directory, args.continue_from, int(args.batch_split), args.num_iterations)

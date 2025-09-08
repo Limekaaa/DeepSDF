@@ -8,7 +8,7 @@ import os
 import torch
 import deep_sdf
 import deep_sdf.workspace as ws
-
+import json
 
 def running_mean(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0))
@@ -18,7 +18,8 @@ def running_mean(x, N):
 def load_logs(experiment_directory, type):
 
     logs = torch.load(os.path.join(experiment_directory, ws.logs_filename))
-
+    specs = json.load(open(os.path.join(experiment_directory, "specs.json")))
+    test_freq = specs.get("TestFrequency", 100)
     logging.info("latest epoch is {}".format(logs["epoch"]))
 
     num_iters = len(logs["loss"])
@@ -45,7 +46,24 @@ def load_logs(experiment_directory, type):
             "#16628b",
         )
 
-        ax.set(xlabel="Epoch", ylabel="Loss", title="Training Loss")
+        # Adding test loss data to the plot
+        #test_epochs = np.arange(0, logs["epoch"], test_freq) #/ iters_per_epoch  # Epochs corresponding to test loss logs
+        #test_epochs = test_epochs[: len(logs['test_loss'])]  # Ensure matching lengths
+
+        test_loss = np.array(logs['test_loss'])
+        test_epochs = np.array([i*test_freq for i in range(len(test_loss))])
+        test_loss = np.interp(np.arange(logs["epoch"]), test_epochs, test_loss)
+
+        ax.plot(
+            np.arange(logs["epoch"]),
+            test_loss,
+            color="#ff7f0e",  # Orange color for test loss
+            label="Test Loss",
+            #marker='o',  # Optional: Adding markers for clarity
+        )
+
+        # Setting labels and title
+        ax.set(xlabel="Epoch", ylabel="Loss", title="Training and Test Loss Over Time")
 
     elif type == "learning_rate":
         combined_lrs = np.array(logs["learning_rate"])
