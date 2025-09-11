@@ -9,19 +9,20 @@ import random
 import torch
 import torch.utils.data
 
-import pytorch_volumetric as pv
+#import pytorch_volumetric as pv
 
 import deep_sdf.workspace as ws
 
 
 import os
 import numpy as np
-import meshio
-from shapely.geometry import Point, Polygon
-from shapely.ops import unary_union
-from scipy.spatial import cKDTree
-import matplotlib.pyplot as plt
-
+try:
+    import meshio
+    from shapely.geometry import Point, Polygon
+    from shapely.ops import unary_union
+    from scipy.spatial import cKDTree
+except:
+    print("meshio, shapely and scipy not imported")
 
 # Added by me _______________________________________________________________________________________________________
 

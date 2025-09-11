@@ -736,10 +736,6 @@ if __name__ == "__main__":
         help="Number of iterations to create latent vectors of the test shape."
     )
 
-    deep_sdf.add_common_args(arg_parser)
-
     args = arg_parser.parse_args()
-
-    deep_sdf.configure_logging(args)
 
     main_function(args.experiment_directory, args.continue_from, int(args.batch_split), args.num_iterations)
