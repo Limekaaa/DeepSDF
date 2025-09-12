@@ -62,8 +62,11 @@ def load_logs(experiment_directory, type):
             #marker='o',  # Optional: Adding markers for clarity
         )
         #print(np.arange(test_freq, logs["epoch"], test_freq))
+        x_axis = np.arange(test_freq, logs["epoch"]+test_freq, test_freq)
+        if len(x_axis) > len(logs['test_loss']):
+            x_axis = x_axis[:len(logs['test_loss'])]
         ax.plot(
-            np.arange(test_freq, logs["epoch"]+test_freq, test_freq),
+            x_axis,
             logs["test_loss"],
             color="#ff7f0e",  # Orange color for test loss
             label="Test Loss",
