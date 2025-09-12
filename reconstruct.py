@@ -200,12 +200,8 @@ if __name__ == "__main__":
 
     decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
 
-    try:
-        decoder = torch.nn.DataParallel(decoder)
-
-    except Exception as e:
-        logging.error("Error occurred while wrapping decoder in DataParallel: {}".format(e))
     
+    decoder = torch.nn.DataParallel(decoder)
 
     saved_model_state = torch.load(
         os.path.join(
@@ -213,9 +209,13 @@ if __name__ == "__main__":
         )
     )
     saved_model_epoch = saved_model_state["epoch"]
-
-    decoder.load_state_dict(saved_model_state["model_state_dict"])
-
+    try:
+        decoder.load_state_dict(saved_model_state["model_state_dict"])
+    except Exception as e:
+        logging.error("Error occurred while loading model state dict: {}".format(e))
+        decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
+        decoder.load_state_dict(saved_model_state["model_state_dict"])
+        
     decoder = decoder.module.cuda()
 
     with open(args.split_filename, "r") as f:
