@@ -17,7 +17,7 @@ def running_mean(x, N):
 
 def load_logs(experiment_directory, type):
 
-    logs = torch.load(os.path.join(experiment_directory, ws.logs_filename))
+    logs = torch.load(os.path.join(experiment_directory, ws.logs_filename), weights_only = False)
     specs = json.load(open(os.path.join(experiment_directory, "specs.json")))
     test_freq = specs.get("TestFrequency", 100)
     logging.info("latest epoch is {}".format(logs["epoch"]))
