@@ -215,8 +215,8 @@ if __name__ == "__main__":
         logging.error("Error occurred while loading model state dict: {}".format(e))
         decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
         decoder.load_state_dict(saved_model_state["model_state_dict"])
-        
-    decoder = decoder.module.cuda()
+
+    decoder = decoder.to(torch.device("cuda"))
 
     with open(args.split_filename, "r") as f:
         split = json.load(f)
@@ -363,6 +363,20 @@ if __name__ == "__main__":
             image_filename = mesh_filename + "_sdf2d.png"
             plt.savefig(image_filename)
 
+            plt.close()
+
+            #plot error
+            
+            fig, ax = plt.subplots(figsize=(6, 5))
+            error = np.abs(sdf_gt_np - pred_sdf_np)
+            sc = ax.scatter(xyz_np[:, 0], xyz_np[:, 1], c=error.squeeze(), cmap='hot')
+            ax.set_title('Absolute Error |SDF_gt - SDF_pred|')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            plt.colorbar(sc, ax=ax)
+            plt.tight_layout()
+            error_image_filename = mesh_filename + "_sdf_error2d.png"
+            plt.savefig(error_image_filename)
             plt.close()
 
             print(f"Saved 2D SDF image to: {image_filename}")
