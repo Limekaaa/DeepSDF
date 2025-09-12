@@ -51,7 +51,7 @@ def load_logs(experiment_directory, type):
         #test_epochs = test_epochs[: len(logs['test_loss'])]  # Ensure matching lengths
 
         test_loss = np.array(logs['test_loss'])
-        test_epochs = np.array([i*test_freq for i in range(len(test_loss))])
+        test_epochs = np.array([i*test_freq for i in range(1,len(test_loss)+1)])
         test_loss = np.interp(np.arange(logs["epoch"]), test_epochs, test_loss)
         
         ax.plot(
@@ -60,6 +60,14 @@ def load_logs(experiment_directory, type):
             color="#ff7f0e",  # Orange color for test loss
             label="Test Loss",
             #marker='o',  # Optional: Adding markers for clarity
+        )
+        #print(np.arange(test_freq, logs["epoch"], test_freq))
+        ax.plot(
+            np.arange(test_freq, logs["epoch"]+test_freq, test_freq),
+            logs["test_loss"],
+            color="#ff7f0e",  # Orange color for test loss
+            label="Test Loss",
+            marker='o',  # Optional: Adding markers for clarity
         )
 
         # Setting labels and title
