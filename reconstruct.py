@@ -147,6 +147,14 @@ if __name__ == "__main__":
         #required=True,
         help="The split to reconstruct.",
     )
+
+    arg_parser.add_argument(
+        "--n_reconstructions",
+        dest="n_reconstructions",
+        default=20,
+        help="The number of reconstructions to perform.",
+    )
+
     arg_parser.add_argument(
         "--iters",
         dest="iterations",
@@ -211,7 +219,8 @@ if __name__ == "__main__":
     npz_filenames = deep_sdf.data.get_instance_filenames(args.data_source, split)
 
     random.shuffle(npz_filenames)
-
+    npz_filenames = npz_filenames[: int(args.n_reconstructions)]
+    logging.debug("reconstructing {} instances".format(len(npz_filenames)))
     logging.debug(decoder)
 
     err_sum = 0.0
