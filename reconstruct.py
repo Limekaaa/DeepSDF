@@ -200,7 +200,12 @@ if __name__ == "__main__":
 
     decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
 
-    decoder = torch.nn.DataParallel(decoder)
+    try:
+        decoder = torch.nn.DataParallel(decoder)
+
+    except Exception as e:
+        logging.error("Error occurred while wrapping decoder in DataParallel: {}".format(e))
+    
 
     saved_model_state = torch.load(
         os.path.join(
