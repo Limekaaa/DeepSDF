@@ -53,7 +53,7 @@ def load_logs(experiment_directory, type):
         test_loss = np.array(logs['test_loss'])
         test_epochs = np.array([i*test_freq for i in range(len(test_loss))])
         test_loss = np.interp(np.arange(logs["epoch"]), test_epochs, test_loss)
-
+        
         ax.plot(
             np.arange(logs["epoch"]),
             test_loss,
@@ -103,6 +103,10 @@ def load_logs(experiment_directory, type):
             os.makedirs(f"{experiment_directory}/LogsFigs")
         
         plt.savefig(f"{experiment_directory}/LogsFigs/{type}.png")
+        if type == "loss":
+            plt.yscale("log")
+            plt.savefig(f"{experiment_directory}/LogsFigs/{type}_log.png")
+        plt.close()
         #plt.show()
 
 
