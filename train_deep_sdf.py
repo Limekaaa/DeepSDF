@@ -199,7 +199,7 @@ def load_optimizer(experiment_directory, filename, optimizer):
             'optimizer state dict "{}" does not exist'.format(full_filename)
         )
 
-    data = torch.load(full_filename)
+    data = torch.load(full_filename, weights_only=False)
 
     optimizer.load_state_dict(data["optimizer_state_dict"])
 
@@ -223,7 +223,7 @@ def load_latent_vectors(experiment_directory, filename, lat_vecs):
     if not os.path.isfile(full_filename):
         raise Exception('latent state file "{}" does not exist'.format(full_filename))
 
-    data = torch.load(full_filename)
+    data = torch.load(full_filename, weights_only=False)
 
     if isinstance(data["latent_codes"], torch.Tensor):
         if not lat_vecs.num_embeddings == data["latent_codes"].size()[0]:
@@ -273,7 +273,7 @@ def load_logs(experiment_directory):
     if not os.path.isfile(full_filename):
         raise Exception('log file "{}" does not exist'.format(full_filename))
 
-    data = torch.load(full_filename)
+    data = torch.load(full_filename, weights_only=False)
 
     return (
         data["loss"],
